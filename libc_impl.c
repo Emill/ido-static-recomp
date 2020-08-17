@@ -11,6 +11,13 @@
 #include <ctype.h>
 #include <locale.h>
 
+#ifdef __CYGWIN__
+#include <windows.h>
+#endif
+#ifdef __APPLE__
+  #include <mach-o/dyld.h>
+#endif
+
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -144,12 +151,36 @@ static char ctype[] = { 0,
          0,      0,      0,      0,      0,      0,      0,      0
 };
 
-#define REDIRECT_USR_BIN(path, pathSize) if (!memcmp(path, "/usr/lib/", 9)) { memmove(path, path+9, pathSize+1-9); }
+#define REDIRECT_USR_LIB
+
+#ifdef REDIRECT_USR_LIB
+char g_binDir[PATH_MAX+1] = {0};
+#endif
 
 int main(int argc, char *argv[]) {
     int ret;
+
+#ifdef REDIRECT_USR_LIB
+    // gets the current executable's path
+#ifdef __CYGWIN__
+    GetModuleFileName(NULL, g_binDir, PATH_MAX);
+#elif defined __APPLE__
+    uint32_t size = sizeof(g_binDir);
+    _NSGetExecutablePath(&buffer[0], &size));
+#else
+    readlink("/proc/self/exe", g_binDir, sizeof(g_binDir));
+#endif
+    dirname(g_binDir);
+#endif
+
     for (int i = 0; i < 1; i++) {
+#ifdef __CYGWIN__
+        // for some reason mmap fails in mmap_initial_data_range with cygwin
+        // as a workaround we can set this page as RW- and omit the other mmap calls
+        uint8_t *mem = mmap(0, 0x100000000ULL, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#else
         uint8_t *mem = mmap(0, 0x100000000ULL, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
         if (mem == MAP_FAILED) {
             perror("mmap");
             exit(1);
@@ -166,18 +197,22 @@ int main(int argc, char *argv[]) {
 void mmap_initial_data_range(uint8_t *mem, uint32_t start, uint32_t end) {
     custom_libc_data_addr = end;
     end += 4096;
+#ifndef __CYGWIN__
     if (mmap(mem + start, end - start, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
         perror("mmap");
         exit(1);
     }
+#endif
     cur_sbrk = end;
 }
 
 void setup_libc_data(uint8_t *mem) {
+#ifndef __CYGWIN__
     if (mmap(LIBC_RANGE, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
         perror("mmap");
         exit(1);
     }
+#endif
     for (size_t i = 0; i < sizeof(ctype); i++) {
         MEM_S8(CTYPE_ADDR + i) = ctype[i];
     }
@@ -215,10 +250,12 @@ static uint32_t strcpy2(uint8_t *mem, uint32_t dest_addr, uint32_t src_addr) {
 
 uint32_t wrapper_sbrk(uint8_t *mem, int increment) {
     uint32_t old = cur_sbrk;
+#ifndef __CYGWIN__
     if (mmap(mem + old, increment, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
         perror("mmap");
         exit(1);
     }
+#endif
     cur_sbrk += increment;
     return old;
 }
@@ -800,32 +837,32 @@ double wrapper_strtod(uint8_t *mem, uint32_t nptr_addr, uint32_t endptr_addr) {
     return res;
 }
 
-uint32_t wrapper_strchr(uint8_t *mem, uint32_t s_addr, int c) {
+uint32_t wrapper_strchr(uint8_t *mem, uint32_t str_addr, int c) {
     c = c & 0xff;
     for (;;) {
-        unsigned char ch = MEM_U8(s_addr);
+        unsigned char ch = MEM_U8(str_addr);
         if (ch == c) {
-            return s_addr;
+            return str_addr;
         }
         if (ch == '\0') {
             return 0;
         }
-        ++s_addr;
+        ++str_addr;
     }
 }
 
-uint32_t wrapper_strrchr(uint8_t *mem, uint32_t s_addr, int c) {
+uint32_t wrapper_strrchr(uint8_t *mem, uint32_t str_addr, int c) {
     c = c & 0xff;
     uint32_t ret = 0;
     for (;;) {
-        unsigned char ch = MEM_U8(s_addr);
+        unsigned char ch = MEM_U8(str_addr);
         if (ch == c) {
-            ret = s_addr;
+            ret = str_addr;
         }
         if (ch == '\0') {
             return ret;
         }
-        ++s_addr;
+        ++str_addr;
     }
 }
 
@@ -979,6 +1016,15 @@ static uint32_t init_file(uint8_t *mem, int fd, int i, const char *path, const c
         flags = O_RDWR | O_CREAT | O_APPEND;
     }
     if (fd == -1) {
+
+#ifdef REDIRECT_USR_LIB
+        char fixedPath[PATH_MAX+1];
+        if (!memcmp(path, "/usr/lib/err.english.cc", 23+1))
+        {
+            snprintf(fixedPath, PATH_MAX, "%s/err.english.cc", g_binDir);
+            path = fixedPath;
+        }
+#endif
         fd = open(path, flags, 0666);
         if (fd < 0) {
             MEM_U32(ERRNO_ADDR) = errno;
@@ -1174,9 +1220,9 @@ int wrapper_pipe(uint8_t *mem, uint32_t pipefd_addr) {
     return ret;
 }
 
-void wrapper_perror(uint8_t *mem, uint32_t s_addr) {
-    STRING(s)
-    perror(s);
+void wrapper_perror(uint8_t *mem, uint32_t str_addr) {
+    STRING(str)
+    perror(str);
 }
 
 int wrapper_fdopen(uint8_t *mem, int fd, uint32_t mode_addr) {
@@ -1695,14 +1741,14 @@ uint32_t wrapper_fwrite(uint8_t *mem, uint32_t data_addr, uint32_t size, uint32_
     return num_written;
 }
 
-int wrapper_fputs(uint8_t *mem, uint32_t s_addr, uint32_t fp_addr) {
-    uint32_t len = wrapper_strlen(mem, s_addr);
-    uint32_t ret = wrapper_fwrite(mem, s_addr, 1, len, fp_addr);
+int wrapper_fputs(uint8_t *mem, uint32_t str_addr, uint32_t fp_addr) {
+    uint32_t len = wrapper_strlen(mem, str_addr);
+    uint32_t ret = wrapper_fwrite(mem, str_addr, 1, len, fp_addr);
     return ret == 0 && len != 0 ? -1 : 0;
 }
 
-int wrapper_puts(uint8_t *mem, uint32_t s_addr) {
-    int ret = wrapper_fputs(mem, s_addr, STDOUT_ADDR);
+int wrapper_puts(uint8_t *mem, uint32_t str_addr) {
+    int ret = wrapper_fputs(mem, str_addr, STDOUT_ADDR);
     if (ret != 0) {
         return ret;
     }
@@ -1742,10 +1788,10 @@ int wrapper_time(uint8_t *mem, uint32_t tloc_addr) {
     return ret;
 }
 
-void wrapper_bzero(uint8_t *mem, uint32_t s_addr, uint32_t n) {
+void wrapper_bzero(uint8_t *mem, uint32_t str_addr, uint32_t n) {
     while (n--) {
-        MEM_U8(s_addr) = 0;
-        ++s_addr;
+        MEM_U8(str_addr) = 0;
+        ++str_addr;
     }
 }
 
@@ -1996,15 +2042,15 @@ uint32_t wrapper_tempnam(uint8_t *mem, uint32_t dir_addr, uint32_t pfx_addr) {
     return ret_addr;
 }
 
-uint32_t wrapper_tmpnam(uint8_t *mem, uint32_t s_addr) {
+uint32_t wrapper_tmpnam(uint8_t *mem, uint32_t str_addr) {
     char buf[1024];
-    assert(s_addr != 0 && "s NULL not implemented for tmpnam");
+    assert(str_addr != 0 && "s NULL not implemented for tmpnam");
     char *ret = tmpnam(buf);
     if (ret == NULL) {
         return 0;
     } else {
-        strcpy1(mem, s_addr, ret);
-        return s_addr;
+        strcpy1(mem, str_addr, ret);
+        return str_addr;
     }
 }
 
@@ -2079,10 +2125,22 @@ int wrapper_execvp(uint8_t *mem, uint32_t file_addr, uint32_t argv_addr) {
         }
     }
     argv[argc] = NULL;
-#ifdef REDIRECT_USR_BIN
-    REDIRECT_USR_BIN(file, file_len);
+
+#ifdef REDIRECT_USR_LIB
+    if (!memcmp(file, "/usr/lib/", 9))
+    {
+        char fixedPath[PATH_MAX+1];
+#ifdef __CYGWIN__
+        snprintf(fixedPath, PATH_MAX, "%s/%s.exe", g_binDir, file+9);
+#else
+        snprintf(fixedPath, PATH_MAX, "%s/%s", g_binDir, file+9);
 #endif
+        execvp(fixedPath, argv);
+    }
+#else
     execvp(file, argv);
+#endif
+
     MEM_U32(ERRNO_ADDR) = errno;
     for (uint32_t i = 0; i < argc; i++) {
         free(argv[i]);
