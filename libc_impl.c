@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <ctype.h>
 #include <locale.h>
+#include <libgen.h>
 
 #ifdef __CYGWIN__
 #include <windows.h>
@@ -154,23 +155,24 @@ static char ctype[] = { 0,
 #define REDIRECT_USR_LIB
 
 #ifdef REDIRECT_USR_LIB
-char g_binDir[PATH_MAX+1] = {0};
+const char* g_binDir;
 #endif
 
 int main(int argc, char *argv[]) {
     int ret;
+    char binPath[PATH_MAX+1] = {0};
 
 #ifdef REDIRECT_USR_LIB
     // gets the current executable's path
 #ifdef __CYGWIN__
-    GetModuleFileName(NULL, g_binDir, PATH_MAX);
+    GetModuleFileName(NULL, binPath, PATH_MAX);
 #elif defined __APPLE__
-    uint32_t size = sizeof(g_binDir);
-    _NSGetExecutablePath(&buffer[0], &size));
+    uint32_t size = sizeof(binPath);
+    _NSGetExecutablePath(binPath, &size));
 #else
-    readlink("/proc/self/exe", g_binDir, sizeof(g_binDir));
+    readlink("/proc/self/exe", binPath, sizeof(binPath));
 #endif
-    dirname(g_binDir);
+    g_binDir = dirname(binPath);
 #endif
 
     for (int i = 0; i < 1; i++) {
