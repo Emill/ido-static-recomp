@@ -50,7 +50,8 @@
 #define IOB_ADDR 0x0fb528e4
 #define ERRNO_ADDR 0x0fb52720
 #define CTYPE_ADDR 0x0fb504f0
-#define LIBC_RANGE mem + 0x0fb50000, 0x3000
+#define LIBC_ADDR 0x0fb50000
+#define LIBC_SIZE 0x3000
 #endif
 
 #ifdef IDO71
@@ -58,7 +59,8 @@
 #define IOB_ADDR 0x0fb4ee44
 #define ERRNO_ADDR 0x0fb4ec80
 #define CTYPE_ADDR 0x0fb4cba0
-#define LIBC_RANGE mem + 0x0fb4c000, 0x3000
+#define LIBC_ADDR 0x0fb4c000
+#define LIBC_SIZE 0x3000
 #endif
 
 #define STDIN_ADDR IOB_ADDR
@@ -159,6 +161,53 @@ const char* g_binDir;
 #endif
 static int g_file_max = 3;
 
+#ifdef __CYGWIN__
+static size_t g_Pagesize;
+#endif
+
+static uint8_t *memory_map(size_t length)
+{
+#ifdef __CYGWIN__
+    uint8_t *mem = mmap(0, length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    g_Pagesize = sysconf(_SC_PAGESIZE);
+    assert(((uintptr_t)mem & (g_Pagesize-1)) == 0);
+#else
+    uint8_t *mem = mmap(0, length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+    if (mem == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
+    }
+    return mem;
+}
+
+static void memory_allocate(uint8_t *mem, uint32_t start, uint32_t end)
+{
+#ifdef __CYGWIN__
+    uintptr_t _start = ((uintptr_t)mem + start) & ~(g_Pagesize-1);
+    uintptr_t _end = ((uintptr_t)mem + end + (g_Pagesize-1)) & ~(g_Pagesize-1);
+
+    if(mprotect((void*)_start, _end - _start, PROT_READ | PROT_WRITE) < 0) {
+        perror("mprotect");
+        exit(1);
+    }
+#else
+    if (mmap(mem + start, end - start, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
+    }
+#endif
+}
+
+static void memory_unmap(uint8_t *mem, size_t length)
+{
+    if (munmap(mem, length)) {
+        perror("munmap");
+        exit(1);
+    }
+}
+
+
 static void free_all_file_bufs(uint8_t *mem) {
     struct FILE_irix *f = (struct FILE_irix *)&MEM_U32(IOB_ADDR);
     for (int i = 0; i < g_file_max; i++) {
@@ -186,23 +235,12 @@ int main(int argc, char *argv[]) {
 #endif
 
     for (int i = 0; i < 1; i++) {
-#ifdef __CYGWIN__
-        // for some reason mmap fails in mmap_initial_data_range with cygwin
-        // as a workaround we can set this page as RW- and omit the other mmap calls
-        uint8_t *mem = mmap(0, 0x100000000ULL, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-#else
-        uint8_t *mem = mmap(0, 0x100000000ULL, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-#endif
-        if (mem == MAP_FAILED) {
-            perror("mmap");
-            exit(1);
-        }
-
+        uint8_t *mem = memory_map(0x100000000ULL);
         int func(uint8_t *mem, int argc, char *argv[]);
         ret = func(mem, argc, argv);
         wrapper_fflush(mem, 0);
         free_all_file_bufs(mem);
-        munmap(mem, 0x100000000ULL);
+        memory_unmap(mem, 0x100000000ULL);
     }
     return ret;
 }
@@ -210,22 +248,12 @@ int main(int argc, char *argv[]) {
 void mmap_initial_data_range(uint8_t *mem, uint32_t start, uint32_t end) {
     custom_libc_data_addr = end;
     end += 4096;
-#ifndef __CYGWIN__
-    if (mmap(mem + start, end - start, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
-        perror("mmap");
-        exit(1);
-    }
-#endif
+    memory_allocate(mem, start, end);
     cur_sbrk = end;
 }
 
 void setup_libc_data(uint8_t *mem) {
-#ifndef __CYGWIN__
-    if (mmap(LIBC_RANGE, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
-        perror("mmap");
-        exit(1);
-    }
-#endif
+    memory_allocate(mem, LIBC_ADDR, (LIBC_ADDR + LIBC_SIZE));
     for (size_t i = 0; i < sizeof(ctype); i++) {
         MEM_S8(CTYPE_ADDR + i) = ctype[i];
     }
@@ -263,12 +291,7 @@ static uint32_t strcpy2(uint8_t *mem, uint32_t dest_addr, uint32_t src_addr) {
 
 uint32_t wrapper_sbrk(uint8_t *mem, int increment) {
     uint32_t old = cur_sbrk;
-#ifndef __CYGWIN__
-    if (mmap(mem + old, increment, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
-        perror("mmap");
-        exit(1);
-    }
-#endif
+    memory_allocate(mem, old, (old + increment));
     cur_sbrk += increment;
     return old;
 }
