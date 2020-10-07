@@ -157,6 +157,16 @@ static char ctype[] = { 0,
 #ifdef REDIRECT_USR_LIB
 const char* g_binDir;
 #endif
+static int g_file_max = 3;
+
+static void free_all_file_bufs(uint8_t *mem) {
+    struct FILE_irix *f = (struct FILE_irix *)&MEM_U32(IOB_ADDR);
+    for (int i = 0; i < g_file_max; i++) {
+        if (f[i]._flag & IOMYBUF) {
+            wrapper_free(mem, f[i]._base_addr);
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
     int ret;
@@ -191,6 +201,7 @@ int main(int argc, char *argv[]) {
         int func(uint8_t *mem, int argc, char *argv[]);
         ret = func(mem, argc, argv);
         wrapper_fflush(mem, 0);
+        free_all_file_bufs(mem);
         munmap(mem, 0x100000000ULL);
     }
     return ret;
@@ -1043,6 +1054,7 @@ static uint32_t init_file(uint8_t *mem, int fd, int i, const char *path, const c
         }
     }
     assert(i < NFILE);
+    g_file_max = i + 1;
     ret = IOB_ADDR + i * sizeof(struct FILE_irix);
     f[i]._cnt = 0;
     f[i]._ptr_addr = 0;
@@ -1083,8 +1095,8 @@ int wrapper_fclose(uint8_t *mem, uint32_t fp_addr) {
 static int flush_all(uint8_t *mem) {
     struct FILE_irix *f = (struct FILE_irix *)&MEM_U32(IOB_ADDR);
     int ret = 0;
-    for (int i = 0; i < NFILE; i++) {
-        if (f->_flag & IOWRT) {
+    for (int i = 0; i < g_file_max; i++) {
+        if (f[i]._flag & IOWRT) {
             ret |= wrapper_fflush(mem, IOB_ADDR + i * sizeof(struct FILE_irix));
         }
     }
