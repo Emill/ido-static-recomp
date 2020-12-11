@@ -40,7 +40,7 @@ def process_prog(prog, ido_path, ido_flag, build_dir, out_dir, args, recomp_path
     if args.O2:
         flags += " -O2"
     elif args.O3:
-	    flags += " -O3"
+        flags += " -O3"
 
     flags = " -fno-strict-aliasing -lm"
     if platform.system() == "Darwin":
