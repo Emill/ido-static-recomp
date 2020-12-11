@@ -36,17 +36,21 @@ def process_prog(prog, ido_path, ido_flag, build_dir, out_dir, args, recomp_path
         with open(c_file_path, "w") as cFile:
             call(recomp_path + " " + ido_path + prog, cFile)
 
-    flags = " -g -fno-strict-aliasing"
+    flags = " -fno-strict-aliasing"
     if args.O2:
         flags += " -O2"
+    elif args.O3:
+	    flags += " -O3"
 
-    flags = " -g -fno-strict-aliasing -lm"
+    flags = " -fno-strict-aliasing -lm"
     if platform.system() == "Darwin":
         flags += " -fno-pie"
     else:
         flags += " -no-pie"
     if args.O2:
         flags += " -O2"
+    elif args.O3:
+	    flags += " -O3"
 
     call("gcc libc_impl.c " + c_file_path + " -o " + out_file_path + flags + ido_flag)
 
@@ -71,8 +75,8 @@ def main(args):
     else:
         sys.exit("Unsupported ido dir: " + ido_dir)
 
-    if args.multhreading and args.O2:
-        print("WARNING: -O2 and -multhreading used together")
+    if (args.multhreading and args.O2) or (args.multhreading or args.O2):
+        print("WARNING: -O2 or -O3 and -multhreading used together")
 
     if not os.path.exists(build_dir):
         os.mkdir(build_dir)
@@ -91,7 +95,7 @@ def main(args):
     recomp_path = os.path.join(build_dir, "recomp")
     if platform.system().startswith("CYGWIN_NT"):
         recomp_path += ".exe"
-    call("g++ recomp.cpp -o " + recomp_path + " -g -lcapstone" + std_flag + ugen_flag)
+    call("g++ recomp.cpp -o " + recomp_path + " -O2 -lcapstone" + std_flag + ugen_flag)
     
     threads = []
     for prog in BINS:
@@ -112,7 +116,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Static ido recompilation build utility")
     parser.add_argument("ido_path", help="Path to ido")
     parser.add_argument("-O2", help="Build binaries with -O2 (warning: may take forever)", action='store_true')
+    parser.add_argument("-O3", help="Build binaries with -O3 (warning: may take forever)", action='store_true')
     parser.add_argument("-onlylibc", help="Builds libc_impl.c only", action='store_true')
-    parser.add_argument("-multhreading", help="Enables multi threading (deprecated with O2)", action='store_true')
+    parser.add_argument("-multhreading", help="Enables multi threading (deprecated with O2 or O3)", action='store_true')
     rgs = parser.parse_args()
     main(rgs)
