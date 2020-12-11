@@ -50,7 +50,7 @@ def process_prog(prog, ido_path, ido_flag, build_dir, out_dir, args, recomp_path
     if args.O2:
         flags += " -O2"
     elif args.O3:
-	    flags += " -O3"
+        flags += " -O3"
 
     call("gcc libc_impl.c " + c_file_path + " -o " + out_file_path + flags + ido_flag)
 
