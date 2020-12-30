@@ -75,7 +75,7 @@ def main(args):
     else:
         sys.exit("Unsupported ido dir: " + ido_dir)
 
-    if (args.multhreading and args.O2) or (args.multhreading or args.O2):
+    if (args.multhreading and args.O2) or (args.multhreading and args.O2):
         print("WARNING: -O2 or -O3 and -multhreading used together")
 
     if not os.path.exists(build_dir):
