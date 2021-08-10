@@ -2181,7 +2181,7 @@ int wrapper_pathconf(uint8_t *mem, uint32_t path_addr, int name) {
 
 uint32_t wrapper_getenv(uint8_t *mem, uint32_t name_addr) {
     STRING(name);
-    char *value = getenv(name);
+    const char *value = getenv(name);
     if (value == NULL) {
         return 0;
     }
