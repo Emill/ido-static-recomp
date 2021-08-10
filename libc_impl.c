@@ -2180,8 +2180,15 @@ int wrapper_pathconf(uint8_t *mem, uint32_t path_addr, int name) {
 }
 
 uint32_t wrapper_getenv(uint8_t *mem, uint32_t name_addr) {
-    // Return null for everything, for now
-    return 0;
+    STRING(name);
+    char *value = getenv(name);
+    if (value == NULL) {
+        return 0;
+    }
+    size_t value_size = strlen(value) + 1;
+    uint32_t buf_addr = wrapper_malloc(mem, value_size);
+    strcpy1(mem, buf_addr, value);
+    return buf_addr;
 }
 
 uint32_t wrapper_gettxt(uint8_t *mem, uint32_t msgid_addr, uint32_t default_str_addr) {
