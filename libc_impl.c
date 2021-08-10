@@ -2361,7 +2361,19 @@ int wrapper_mkstemp(uint8_t *mem, uint32_t name_addr) {
 
 uint32_t wrapper_tmpfile(uint8_t *mem) {
     // create and fopen a temporary file that is removed when the program exits
-    char name[] = "/tmp/copt_temp_XXXXXX";
+    const char *tmpdir = getenv("TMPDIR");
+    if (tmpdir == NULL) {
+        tmpdir = "/tmp";
+    }
+
+    char name[PATH_MAX + 1] = {0};
+    int n = snprintf(name, sizeof(name), "%s/copt_temp_XXXXXX", tmpdir);
+    if (n < 0 || n >= sizeof(name)) {
+        // This isn't the best errno code, but it is one that can be returned by tmpfile
+        MEM_U32(ERRNO_ADDR) = EACCES;
+        return 0;
+    }
+
     int fd = mkstemp(name);
     if (fd < 0) {
         MEM_U32(ERRNO_ADDR) = errno;
