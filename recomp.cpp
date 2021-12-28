@@ -9,7 +9,11 @@
 #include <vector>
 #include <string>
 
+#if defined(_WIN32) || defined(_WIN64)
 #include <capstone/capstone.h>
+#else
+#include <capstone.h>
+#endif
 
 #include "elf.h"
 
