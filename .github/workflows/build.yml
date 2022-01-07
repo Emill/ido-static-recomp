@@ -29,12 +29,18 @@ jobs:
           
       - name: Run the build script
         shell: bash
+        if: matrix.os != 'macos-latest'
         run: |
           python3 build.py ido/${{ matrix.ido }} -O2
+      - name: Run the build script (MacOS)
+        shell: bash
+        if: matrix.os == 'macos-latest'
+        run: |
+          python3 build.py ido/${{ matrix.ido }} -O2 -universal
       - name: Create release archive
         shell: bash
         run: |
-          cd build${{ matrix.ido }}/out
+          cd build/${{ matrix.ido }}/out
           tar -czvf ../../ido-${{ matrix.ido }}-recomp-${{ matrix.os }}.tar.gz *
       - name: Upload archive
         uses: actions/upload-artifact@v2
