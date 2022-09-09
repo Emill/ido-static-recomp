@@ -63,6 +63,8 @@ def process_prog(prog, ido_path, ido_flag, build_dir, out_dir, args, recomp_path
     if args.O2:
         flags += " -O2"
 
+    flags += " -Wno-deprecated-declarations"
+
     call("gcc libc_impl.c " + c_file_path + " -o " + out_file_path + flags + ido_flag)
 
     return
@@ -96,7 +98,7 @@ def main(args):
     shutil.copy("header.h", build_dir)
     shutil.copy("libc_impl.h", build_dir)
     shutil.copy("helpers.h", build_dir)
-    
+
     out_dir = os.path.join(build_dir, "out")
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
@@ -109,7 +111,7 @@ def main(args):
     if platform.system().startswith("CYGWIN_NT"):
         recomp_path += ".exe"
     call("g++ recomp.cpp -o " + recomp_path + " -g -lcapstone" + std_flag + ugen_flag)
-    
+
     threads = []
     for prog in bins:
         if args.multhreading:
@@ -118,7 +120,7 @@ def main(args):
             t.start()
         else:
             process_prog(prog, ido_path, ido_flag, build_dir, out_dir, args, recomp_path)
-    
+
     if args.multhreading:
         for t in threads:
             t.join()
